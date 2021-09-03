@@ -1,0 +1,134 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata: 
+  name: test
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: server
+  namespace: test
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: proxy
+  namespace: test
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: proxy
+  namespace: test
+spec:
+  selector:
+    matchLabels:
+      app: grpc-proxy
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: grpc-proxy
+    spec:
+      containers:
+      - name: grpc-proxy
+        image: henryma68/demoproxy:v3
+        ports:
+        - name: grpc
+          containerPort: 8080
+      serviceAccountName: proxy
+      nodeSelector:
+        zone: proxy                                                                                                                                                                                                                                                                                                                       
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server
+  namespace: test
+spec:
+  selector:
+    matchLabels:
+      app: grpc-server
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: grpc-server
+    spec:
+      containers:
+      - name: grpc-server
+        image: henryma68/raspicamera:v5
+        volumeMounts:
+          - name: local-volume
+            mountPath: /root
+          - name: usb-volume
+            mountPath: /dev/bus/usb  
+        securityContext:
+          privileged: true
+        ports:
+        - name: grpc
+          containerPort: 8080
+        resources:
+          requests:
+            cpu: 100m
+      volumes:
+        - name: local-volume
+          hostPath:
+            path: /data
+            type: DirectoryOrCreate
+        - name: usb-volume
+          hostPath:
+            path: /dev/bus/usb           
+      serviceAccountName: server
+      nodeSelector:
+        zone: grpcserver
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grpc-proxy
+  namespace: test
+spec:
+  ports:
+  - name: grpc
+    port: 8080
+    targetPort: 8080
+  selector:
+    app: grpc-proxy
+  type: LoadBalancer
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grpc-server
+  namespace: test
+spec:
+  ports:
+  - name: grpc
+    port: 8080
+    targetPort: 8080
+  selector:
+    app: grpc-server
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  annotations:
+    kubernetes.io/ingress.class: traefik
+    ingress.kubernetes.io/custom-request-headers: l5d-dst-override:grpc-server.test.svc.cluster.local:8080
+  name: grpc-server
+  namespace: test
+spec:
+  rules:
+  - host: grpc-server.techarea.org
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: grpc-server
+          servicePort: 8080
+

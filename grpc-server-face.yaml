@@ -1,0 +1,145 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata: 
+  name: face
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: server
+  namespace: face
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: proxy
+  namespace: face
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: proxy
+  namespace: face
+spec:
+  selector:
+    matchLabels:
+      app: grpc-proxy
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: grpc-proxy
+    spec:
+      containers:
+      - name: grpc-proxy
+        image: henryma68/face_nginx:v1
+        ports:
+        - name: grpc
+          containerPort: 8080
+      serviceAccountName: proxy
+      nodeSelector:
+        zone: proxy                                                                                                                                                                                                                                                                                                                       
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server
+  namespace: face
+spec:
+  selector:
+    matchLabels:
+      app: grpc-server
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: grpc-server
+    spec:
+      containers:
+      - name: grpc-server
+        image: henryma68/grpcfacenet:v2
+        volumeMounts:
+          - name: local-volume
+            mountPath: /root/Test/copy
+          - name: usb-volume
+            mountPath: /dev/bus/usb  
+        securityContext:
+          privileged: true
+        ports:
+        - name: grpc
+          containerPort: 8080
+        resources:
+          requests:
+            cpu: 100m
+      volumes:
+        - name: local-volume
+          hostPath:
+            path: /data
+            type: DirectoryOrCreate
+        - name: usb-volume
+          hostPath:
+            path: /dev/bus/usb           
+      serviceAccountName: server
+      nodeSelector:
+        zone: grpcserver
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grpc-proxy
+  namespace: face
+spec:
+  ports:
+  - name: grpc
+    port: 8080
+    targetPort: 8080
+  selector:
+    app: grpc-proxy
+  type: LoadBalancer
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grpc-client
+  namespace: face
+spec:
+  ports:
+  - name: grpc
+    port: 8080
+    targetPort: 8080
+  selector:
+    app: grpc-client
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grpc-server
+  namespace: face
+spec:
+  ports:
+  - name: grpc
+    port: 8080
+    targetPort: 8080
+  selector:
+    app: grpc-server
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  annotations:
+    kubernetes.io/ingress.class: traefik
+  name: grpc-server
+spec:
+  rules:
+  - host: grpc-server.techarea.org
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: grpc-server
+          servicePort: 8080
+

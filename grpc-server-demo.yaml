@@ -1,0 +1,182 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: server
+  namespace: demo
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: client
+  namespace: demo
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: proxy
+  namespace: demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: client
+  namespace: demo
+spec:
+  selector:
+    matchLabels:
+      app: grpc-client
+  replicas: 0
+  template:
+    metadata:
+      labels:
+        app: grpc-client
+    spec:
+      containers:
+      - name: grpc-client
+        env:
+        - name: PROXY_IP
+          value: grpc-proxy.demo:8080
+        - name: SERVER_IP
+          value: grpc-server.demo:8080
+        image: richliu/keras_run:latest
+        ports:
+        - name: grpc
+          containerPort: 8080
+        resources:
+          requests:
+            cpu: 100m
+      serviceAccountName: client
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    linkerd.io/inject: enabled
+  name: proxy
+  namespace: demo
+spec:
+  selector:
+    matchLabels:
+      app: grpc-proxy
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: grpc-proxy
+    spec:
+      containers:
+      - name: grpc-proxy
+        image: henryma68/demoproxy:v2
+        ports:
+        - name: grpc
+          containerPort: 8080
+      serviceAccountName: proxy
+      nodeSelector:
+        zone: proxy                                                                                                                                                                                                                                                               
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server
+  namespace: demo
+spec:
+  selector:
+    matchLabels:
+      app: grpc-server
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: grpc-server
+    spec:
+      containers:
+      - name: grpc-server
+        image: henryma68/raspitpu:v6
+        volumeMounts:
+          - name: local-volume
+            mountPath: /root/Demo_v2
+          - name: usb-volume
+            mountPath: /dev/bus/usb  
+        securityContext:
+          privileged: true
+        ports:
+        - name: grpc
+          containerPort: 8080
+        resources:
+          requests:
+            cpu: 100m
+      volumes:
+        - name: local-volume
+          hostPath:
+            path: /home/ubuntu/Demo_v2
+            type: DirectoryOrCreate
+        - name: usb-volume
+          hostPath:
+            path: /dev/bus/usb           
+      serviceAccountName: server
+      nodeSelector:
+        zone: grpcserver
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grpc-proxy
+  namespace: demo
+spec:
+  ports:
+  - name: grpc
+    port: 8080
+    targetPort: 8080
+  selector:
+    app: grpc-proxy
+  type: LoadBalancer
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grpc-client
+  namespace: demo
+spec:
+  ports:
+  - name: grpc
+    port: 8080
+    targetPort: 8080
+  selector:
+    app: grpc-client
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grpc-server
+  namespace: demo
+spec:
+  ports:
+  - name: grpc
+    port: 8080
+    targetPort: 8080
+  selector:
+    app: grpc-server
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  annotations:
+    kubernetes.io/ingress.class: traefik
+  name: grpc-server
+spec:
+  rules:
+  - host: grpc-server.techarea.org
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: grpc-server
+          servicePort: 8080
+
