@@ -1,0 +1,1 @@
+# k8s-deployment-for-AIoT-Cow-estrus-detection
